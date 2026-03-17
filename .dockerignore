@@ -1,0 +1,11 @@
+**/.git
+**/.gitignore
+**/.vscode
+**/.idea
+**/node_modules
+**/.pio
+**/.esphome
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+web-panel/.env

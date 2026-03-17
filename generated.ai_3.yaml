@@ -1,0 +1,49 @@
+esphome:
+  name: esphome_device
+  friendly_name: ESPHome Device
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# 基础日志功能
+logger:
+
+# 远程 API 控制
+api:
+
+# OTA 在线更新
+ota:
+
+# WiFi 连接配置
+wifi:
+  ssid: "YOUR_SSID"
+  password: "YOUR_PASSWORD"
+  ap:
+    ssid: "Fallback Hotspot"
+    password: "12345678"
+
+# Web 服务器便于调试
+web_server:
+  port: 80
+
+# 设备状态与诊断
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "Connected SSID"
+
+# 重启按钮
+button:
+  - platform: restart
+    name: "Restart Device"

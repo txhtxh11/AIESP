@@ -1,0 +1,164 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ESPHome HomeKit 面板</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="bg"></div>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <h1>ESPHome HomeKit 生成面板</h1>
+        <p>读取 YAML 实体，自动识别 ESP32/ESP8266，并生成带 HomeKit 的新配置。</p>
+      </div>
+      <div class="status" id="status">等待载入...</div>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <div class="ai-header">
+          <h2>AI 聊天</h2>
+          <div class="ai-actions">
+            <button class="gear" id="logFloatToggle" title="编译日志">日志</button>
+            <button class="gear" id="aiConfigToggle" title="AI 配置">⚙</button>
+          </div>
+        </div>
+        <div class="summary">普通聊天不会改配置；包含“改/修/生成/配置/编译”等关键词会自动执行。未选文件时将生成新 YAML，并自动编译固件。</div>
+        <div class="ai-config hidden" id="aiConfigPanel">
+          <div class="field">
+            <label>API 地址</label>
+            <input id="apiBaseUrl" placeholder="https://api.openai.com" />
+            <div class="summary">仅保存在浏览器本地，不会上传服务器。</div>
+          </div>
+          <div class="field">
+            <label>模型</label>
+            <input id="apiModel" placeholder="gpt-5.2-codex" />
+          </div>
+          <div class="field">
+            <label>API 密钥</label>
+            <input id="apiKey" type="password" placeholder="sk-..." />
+          </div>
+          <div class="field">
+            <label>HA Agent 地址</label>
+            <input id="haAgentUrl" placeholder="http://localhost:8091" />
+            <div class="summary">用于将生成的插件写入 Home Assistant 的 /config/custom_components。</div>
+          </div>
+          <div class="field">
+            <label>HA Agent Key</label>
+            <input id="haAgentKey" type="password" placeholder="123456" />
+          </div>
+          <div class="field">
+            <label>AI 输出文件名（可选）</label>
+            <input id="aiOutputName" placeholder="比如：my_config.ai.yaml" />
+          </div>
+          <div class="field">
+            <button id="aiConfigSave">保存并隐藏</button>
+          </div>
+        </div>
+        <div class="chat" id="chatBox"></div>
+        <div class="chat-input">
+          <input id="chatInput" placeholder="问我问题，比如：8266 的 homekit 怎么写？" />
+          <div class="summary">提示：输入包含“插件/集成/HACS + 生成/创建/编写”会生成 HA 插件并写入 custom_components。</div>
+          <button id="chatSend">发送</button>
+        </div>
+        <div class="ai-build">
+          <div class="field">
+            <label>自动编译模式</label>
+            <select id="aiBuildMode">
+              <option value="compile">compile（只编译）</option>
+              <option value="run">run（编译+烧录）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>设备端口（run 可选）</label>
+            <input id="aiBuildDevice" placeholder="COM3 或 /dev/ttyUSB0" />
+          </div>
+          <div class="field">
+            <label>最大尝试次数</label>
+            <input id="aiBuildAttempts" type="number" min="1" max="10" value="3" />
+          </div>
+          <div class="field">
+            <button id="aiBuildBtn">自动编译修复</button>
+          </div>
+          <div class="summary" id="aiBuildSummary"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>1. 选择 YAML</h2>
+        <div class="field">
+          <label>配置文件</label>
+          <select id="yamlSelect"></select>
+        </div>
+        <div class="field">
+          <button id="loadBtn">读取实体</button>
+        </div>
+        <div class="field">
+          <label>上传 YAML</label>
+          <input type="file" id="uploadInput" accept=".yaml,.yml" />
+          <button id="uploadBtn">上传并刷新列表</button>
+        </div>
+        <div class="summary" id="fileSummary"></div>
+      </div>
+
+      <div class="card">
+        <h2>2. HomeKit 选项</h2>
+        <div class="field">
+          <label>芯片型号</label>
+          <div class="chip" id="platformChip">未知</div>
+        </div>
+        <div class="field" id="setupCodeField">
+          <label>配对码 (ESP8266)</label>
+          <div class="summary">ESP8266 配对码由 MAC 自动生成，无需填写。</div>
+        </div>
+        <div class="entity-container" id="entityContainer"></div>
+      </div>
+
+      <div class="card">
+        <h2>3. 生成结果</h2>
+        <div class="field">
+          <label>输出文件名</label>
+          <input id="outputName" placeholder="自动生成" />
+        </div>
+        <div class="field">
+          <label>插入中文面板</label>
+          <label class="toggle">
+            <input type="checkbox" id="webPanelToggle" checked />
+            <span>插入 web_server + www.js</span>
+          </label>
+        </div>
+        <div class="field">
+          <button class="primary" id="generateBtn">生成新 YAML</button>
+        </div>
+        <div class="field">
+          <button id="downloadBtn" disabled>下载生成文件</button>
+        </div>
+        <div class="field">
+          <button id="firmwareDownloadBtn" disabled>下载编译固件</button>
+        </div>
+        <div class="summary" id="resultSummary"></div>
+        <textarea id="outputPreview" rows="14" spellcheck="false"></textarea>
+      </div>
+    </section>
+  </main>
+
+  <div class="log-float hidden" id="logFloat">
+    <div class="log-float-header" id="logFloatHeader">
+      <span id="logFloatTitle">编译日志</span>
+      <div class="log-float-actions">
+        <button id="logFloatStop">停止</button>
+        <button id="logFloatClear">清空</button>
+        <button id="logFloatClose">关闭</button>
+      </div>
+    </div>
+    <pre class="log-float-body" id="logFloatBody"></pre>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

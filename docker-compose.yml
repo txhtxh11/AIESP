@@ -1,0 +1,20 @@
+services:
+  esphome-ai:
+    build: .
+    container_name: esphome-ai
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+    environment:
+      - TZ=Asia/Shanghai
+      # 如需代理访问 GitHub/PlatformIO，请设置：
+      # - HTTP_PROXY=http://user:pass@host:port
+      # - HTTPS_PROXY=http://user:pass@host:port
+      # - ALL_PROXY=socks5://host:port
+      # 代理证书校验问题可关闭（不建议长期关闭）：
+      # - PLATFORMIO_SETTING_ENABLE_PROXY_STRICT_SSL=false
+    # 如果需要烧录设备，可放开下面配置并按需修改:
+    # privileged: true
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"

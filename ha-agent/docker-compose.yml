@@ -1,0 +1,12 @@
+﻿services:
+  ha-agent:
+    build: .
+    container_name: ha-agent
+    ports:
+      - "8091:8091"
+    environment:
+      - CONFIG_DIR=/config
+      - AGENT_KEY=123456
+    volumes:
+      - /PATH_TO_YOUR_CONFIG:/config
+    restart: unless-stopped

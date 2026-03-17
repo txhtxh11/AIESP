@@ -1,0 +1,32 @@
+esphome:
+  name: gpio5_switch
+  friendly_name: GPIO5开关
+
+esp8266:
+  board: esp01_1m
+
+# 启用日志
+logger:
+
+# 启用OTA
+ota:
+
+# 启用API
+api:
+
+# WiFi配置
+wifi:
+  ssid: "your_ssid"
+  password: "your_password"
+  ap:
+    ssid: "gpio5_switch_fallback"
+    password: "12345678"
+
+captive_portal:
+
+# 新增GPIO5开关
+switch:
+  - platform: gpio
+    name: "GPIO5开关"
+    pin: GPIO5
+    id: gpio5_switch
