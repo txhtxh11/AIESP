@@ -1,6 +1,6 @@
 # ESPHome HomeKit 生成面板
-# 本分支修复了原项目https://github.com/00660/AIESP的部分BUG
-  **见BUGFIXES.md**
+# 本分支修复了原项目 https://github.com/00660/AIESP 的部分BUG
+  见BUGFIXES.md
   设置了固定homekit配对码111-11-111
 这是一个集成式的小工具，用于读取 ESPHome YAML，自动识别 ESP32/ESP8266 并生成带 HomeKit 的新配置，同时提供 AI 聊天、自动编译修复、固件下载与 Home Assistant 插件生成能力。
 
