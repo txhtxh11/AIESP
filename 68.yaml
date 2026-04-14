@@ -1,0 +1,54 @@
+# 修复设备名称中的下划线，避免 DHCP 和本地名称服务问题
+esphome:
+  name: esp8266-blinker
+
+esp8266:
+  board: esp01_1m
+
+# WiFi 配置：优先连接 ASUS，失败后自动开启 AP 热点
+wifi:
+  # ssid: "ASUS"
+  # password: "89160900"
+  min_auth_mode: WPA2
+  ap:
+    ssid: "ESP8266-Blinker"   # 后备热点名称
+    password: ""              # 无密码
+
+# 强制门户：连接 AP 后自动弹出配置页面
+captive_portal:
+
+logger:
+
+api:
+
+# OTA 升级
+ota:
+  - platform: esphome
+
+# Web 服务器（version 1 自带 OTA 控件）
+web_server:
+  port: 80
+  version: 1
+
+# 板载 LED 开关
+switch:
+  - platform: gpio
+    pin: GPIO2
+    id: onboard_led
+    name: "Onboard LED"
+    inverted: true
+
+binary_sensor:
+  - platform: gpio
+    id: hk_binary_1
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Flash Button"
+
+    on_click:
+      - min_length: 50ms
+        max_length: 800ms
+        then:
+          - switch.toggle: onboard_led

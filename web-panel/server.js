@@ -12,6 +12,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ROOT_DIR = path.resolve(__dirname, "..");
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+
+const DEFAULT_OPENAI_API_KEY = "";
+const DEFAULT_OPENAI_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
+const DEFAULT_OPENAI_MODEL = "glm-4.5-flash";
+
 const jobs = new Map();
 const JOB_EVENT_LIMIT = 2000;
 
@@ -249,8 +254,9 @@ app.post("/api/preview", (req, res) => {
     const doc = safeLoadYaml(text);
     const platform = detectPlatform(doc, text);
     const entities = extractEntities(doc);
+    const firmwarePath = findFirmwareForYaml(text, filename);
 
-    res.json({ platform, entities });
+    res.json({ platform, entities, firmwarePath });
   } catch (err) {
     res.status(500).json({ error: err.message || "解析失败" });
   }
@@ -298,6 +304,9 @@ app.post("/api/generate", (req, res) => {
     }
 
     text = `${text}${text.endsWith("\n") ? "" : "\n"}${commentLine}\n${homekitBlock}`;
+
+    // 添加 HomeKit 重置按钮
+    text = addHomekitResetButton(text, platform, homekitId);
 
     const outputName = options?.outputName || buildOutputName(filename);
     const outputPath = path.join(ROOT_DIR, outputName);
@@ -470,24 +479,29 @@ function guessBinaryType(deviceClass) {
 }
 
 function normalizeSelections(platform, selections) {
+  const result = {};
+  
   if (platform === "esp32") {
-    return {
-      light: ensureEntityArray(selections.light),
-      switch: ensureEntityArray(selections.switch),
-      sensor: ensureEntityArray(selections.sensor),
-      fan: ensureEntityArray(selections.fan),
-      climate: ensureEntityArray(selections.climate),
-      lock: ensureEntityArray(selections.lock),
-    };
+    result.light = ensureEntityArray(selections.light);
+    result.switch = ensureEntityArray(selections.switch);
+    result.sensor = ensureEntityArray(selections.sensor);
+    result.fan = ensureEntityArray(selections.fan);
+    result.climate = ensureEntityArray(selections.climate);
+    result.lock = ensureEntityArray(selections.lock);
+  } else {
+    result.switches = ensureEntityArray(selections.switches);
+    result.lights = ensureEntityArray(selections.lights);
+    result.fans = ensureEntityArray(selections.fans);
+    result.sensors = ensureTypedEntityArray(selections.sensors);
+    result.binary_sensors = ensureTypedEntityArray(selections.binary_sensors);
   }
-
-  return {
-    switches: ensureEntityArray(selections.switches),
-    lights: ensureEntityArray(selections.lights),
-    fans: ensureEntityArray(selections.fans),
-    sensors: ensureTypedEntityArray(selections.sensors),
-    binary_sensors: ensureTypedEntityArray(selections.binary_sensors),
-  };
+  
+  // 添加配对码
+  if (selections.setup_code && typeof selections.setup_code === "string") {
+    result.setup_code = selections.setup_code.trim();
+  }
+  
+  return result;
 }
 
 function ensureEntityArray(list) {
@@ -517,9 +531,16 @@ function ensureTypedEntityArray(list) {
 }
 
 function buildHomekitConfig(platform, selections, homekitId) {
+  const cfg = {};
+  
+  if (homekitId) cfg.id = homekitId;
+  
+  // 添加配对码
+  if (selections.setup_code) {
+    cfg.setup_code = selections.setup_code;
+  }
+  
   if (platform === "esp32") {
-    const cfg = {};
-    if (homekitId) cfg.id = homekitId;
     if (selections.light.length) cfg.light = selections.light.map((item) => ({ id: item.id }));
     if (selections.switch.length) cfg.switch = selections.switch.map((item) => ({ id: item.id }));
     if (selections.sensor.length) cfg.sensor = selections.sensor.map((item) => ({ id: item.id }));
@@ -529,8 +550,6 @@ function buildHomekitConfig(platform, selections, homekitId) {
     return cfg;
   }
 
-  const cfg = {};
-  if (homekitId) cfg.id = homekitId;
   if (selections.switches.length) cfg.switches = selections.switches.map((s) => s.id);
   if (selections.lights.length) cfg.lights = selections.lights.map((s) => s.id);
   if (selections.fans.length) cfg.fans = selections.fans.map((s) => s.id);
@@ -781,8 +800,8 @@ function removeTopLevelBlock(text, key) {
 }
 
 function ensureExternalComponents(text, platform) {
-  const pathToken = platform === "esp32" ? "homekit-esp32" : "homekit-esp8226";
-  if (text.includes(pathToken)) {
+  const localPath = platform === "esp32" ? "./homekit-esp32" : "./homekit-esp8266";
+  if (text.includes(localPath)) {
     return { text, added: false };
   }
 
@@ -807,30 +826,93 @@ function ensureExternalComponents(text, platform) {
     endIdx += 1;
   }
 
-  const commentLine = "  # 自动插入的 HomeKit 组件源";
-  lines.splice(endIdx, 0, commentLine, ...entryLines);
-  return { text: lines.join("\n"), added: true };
+  const blockLines = lines.slice(startIdx, endIdx);
+   if (blockLines.some(l => l.includes(localPath))) {
+    return { text, added: false };
+  }
+
+  return { text, added: false };
 }
 
 function buildExternalComponentEntryLines(platform) {
   const listIndent = "  ";
-  const nestedIndent = "    ";
-  const deepIndent = "      ";
-  const pathValue = platform === "esp32" ? "./homekit-esp32" : "./homekit-esp8226";
+  const sourceIndent = "    ";
+  const componentsIndent = "    ";
+  const componentItemIndent = "      ";
+  const localRepo = platform === "esp32" ? "./homekit-esp32" : "./homekit-esp8266";
   const components = platform === "esp32" ? ["homekit", "homekit_base"] : ["homekit"];
 
   const lines = [
-    `${listIndent}- source:`,
-    `${nestedIndent}type: local`,
-    `${nestedIndent}path: ${pathValue}`,
-    `${nestedIndent}components:`,
+    `${listIndent}- source: ${localRepo}`,
+    `${componentsIndent}components:`,
   ];
 
   for (const c of components) {
-    lines.push(`${deepIndent}- ${c}`);
+    lines.push(`${componentItemIndent}- ${c}`);
   }
 
   return lines;
+}
+
+function ensureCorrectExternalComponents(text, platform) {
+  const localRepo = platform === "esp32" ? "./homekit-esp32" : "./homekit-esp8266";
+  const lines = text.split(/\r?\n/);
+  const result = [];
+  let foundCorrect = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (/^\s*external_components:\s*($|#)/.test(line)) {
+      let extEnd = i + 1;
+      while (extEnd < lines.length) {
+        const l = lines[extEnd];
+        if (l.trim() === "" || l.trim().startsWith("#")) { extEnd++; continue; }
+        if (/^\S/.test(l)) break;
+        extEnd++;
+      }
+      const block = lines.slice(i, extEnd).join("\n");
+
+      if (block.includes(localRepo) || block.includes("./homekit-esp")) {
+        foundCorrect = true;
+        result.push(...lines.slice(i, extEnd));
+        i = extEnd - 1;
+        continue;
+      }
+
+      if (!foundCorrect && block.includes("external_components")) {
+        const fixedBlock = [
+          "external_components:",
+          `  - source: ${localRepo}`,
+          `    components:`,
+          `      - homekit`,
+        ].join("\n");
+        result.push(fixedBlock);
+        foundCorrect = true;
+        i = extEnd - 1;
+        continue;
+      }
+
+      result.push(line);
+      i = extEnd - 1;
+      continue;
+    }
+
+    result.push(line);
+  }
+
+  if (!foundCorrect) {
+    const fixedBlock = [
+      "",
+      "external_components:",
+      `  - source: ${localRepo}`,
+      `    components:`,
+      `      - homekit`,
+    ].join("\n");
+    result.push(fixedBlock);
+  }
+
+  return result.join("\n");
 }
 
 async function autoBuildLoop({
@@ -847,8 +929,8 @@ async function autoBuildLoop({
   onChild,
 }) {
   const apiKey = String(config?.api_key || process.env.OPENAI_API_KEY || "");
-  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
-  const model = String(config?.model || process.env.OPENAI_MODEL || "gpt-5.2-codex");
+  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, "");
+  const model = String(config?.model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL);
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT || "";
   const disableStore = String(process.env.OPENAI_DISABLE_RESPONSE_STORAGE || "").toLowerCase() === "true";
 
@@ -856,13 +938,46 @@ async function autoBuildLoop({
     throw new Error("未配置 API Key");
   }
 
-  const workName = normalizeYamlName(options?.output_name || buildAiOutputName(filename));
-  const workPath = path.join(ROOT_DIR, workName);
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`找不到待编译文件: ${filePath}`);
+  const basename = path.basename(filename);
+  
+  let workName;
+  let sourcePath = filePath;
+  
+  // 检查是否存在对应的 .homekit.yaml 文件
+  if (!options?.output_name && !isGeneratedFileName(basename)) {
+    const ext = path.extname(filename);
+    const base = path.basename(filename, ext);
+    const homekitName = `${base}.homekit${ext || ".yaml"}`;
+    const homekitPath = path.join(ROOT_DIR, homekitName);
+    
+    if (fs.existsSync(homekitPath)) {
+      // 使用 .homekit.yaml 作为源文件和工作文件
+      workName = homekitName;
+      sourcePath = homekitPath;
+    }
   }
-  if (path.resolve(filePath) !== path.resolve(workPath)) {
-    fs.copyFileSync(filePath, workPath);
+  
+  if (!workName) {
+    // 如果未确定工作文件名，使用标准逻辑
+    if (options?.output_name) {
+      workName = normalizeYamlName(options.output_name);
+    } else if (isGeneratedFileName(basename)) {
+      workName = basename;
+    } else {
+      workName = normalizeYamlName(buildAiOutputName(filename));
+    }
+  }
+  
+  const workPath = path.join(ROOT_DIR, workName);
+  
+  // 检查源文件是否存在
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`找不到源文件: ${sourcePath}`);
+  }
+  
+  // 如果源文件和工作文件不同，则复制
+  if (path.resolve(sourcePath) !== path.resolve(workPath)) {
+    fs.copyFileSync(sourcePath, workPath);
   }
 
   if (onStatus) onStatus(`最大尝试次数：${maxAttempts}`);
@@ -941,6 +1056,14 @@ async function startBuildJob(job, payload = {}) {
     if (!fs.existsSync(filePath)) {
       return emitJob(job, { type: "error", message: "文件不存在" });
     }
+
+    const ext = path.extname(filename);
+    const base = path.basename(filename, ext);
+    const platform = base.includes("8266") ? "esp8266" : "esp32";
+    let yamlText = fs.readFileSync(filePath, "utf8");
+    yamlText = ensureCorrectExternalComponents(yamlText, platform);
+    fs.writeFileSync(filePath, yamlText, "utf8");
+
     const maxAttempts = Math.max(1, Math.min(10, Number(attempts || 3)));
     const runMode = mode === "run" ? "run" : "compile";
 
@@ -1065,6 +1188,7 @@ async function fixYamlWithAI({ baseUrl, apiKey, model, reasoningEffort, disableS
     "你是 ESPHome 配置修复助手。",
     "根据编译错误修复 YAML。",
     "必须输出完整 YAML，不能包含 Markdown 或多余解释。",
+    "不要修改 external_components 配置块，即使配置格式看起来不对也不要改动。",
     "尽量保持原有结构与顺序，仅做必要修改。",
     "每处修改前加一行中文注释，说明改动原因。",
   ].join(" ");
@@ -1079,14 +1203,42 @@ async function fixYamlWithAI({ baseUrl, apiKey, model, reasoningEffort, disableS
 
   const data = await callOpenAI(baseUrl, apiKey, model, input, reasoningEffort, disableStore);
   const reply = extractOutputText(data);
-  const outputText = stripCodeFence(reply || "");
+  let outputText = stripCodeFence(reply || "");
   if (!outputText.trim()) {
     throw new Error("AI 未返回有效 YAML");
   }
+  outputText = ensureCorrectExternalComponents(outputText, "esp8266");
   return outputText;
 }
 
 async function callOpenAI(baseUrl, apiKey, model, input, reasoningEffort, disableStore) {
+  const isZAI = baseUrl.includes("bigmodel.cn") || baseUrl.includes("api.z.ai");
+  
+  if (isZAI) {
+    const messages = input.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }));
+    const systemMsg = input.find(m => m.role === "system");
+    if (systemMsg) messages.unshift({ role: "system", content: systemMsg.content });
+    
+    const body = { model, messages, temperature: 0.7 };
+    
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`OpenAI 请求失败: ${resp.status} ${text}`);
+    }
+
+    const data = await resp.json();
+    return { output_text: data.choices?.[0]?.message?.content || "" };
+  }
+
   const body = {
     model,
     input,
@@ -1114,6 +1266,58 @@ async function callOpenAI(baseUrl, apiKey, model, input, reasoningEffort, disabl
 }
 
 async function callOpenAIStream(baseUrl, apiKey, model, input, reasoningEffort, disableStore, onEvent) {
+  const isZAI = baseUrl.includes("bigmodel.cn") || baseUrl.includes("api.z.ai");
+  
+  if (isZAI) {
+    const messages = input.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }));
+    const systemMsg = input.find(m => m.role === "system");
+    if (systemMsg) messages.unshift({ role: "system", content: systemMsg.content });
+    
+    const body = { model, messages, temperature: 0.7, stream: true };
+    
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok || !resp.body) {
+      const text = await resp.text();
+      throw new Error(`OpenAI 请求失败: ${resp.status} ${text}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index;
+      while ((index = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (!line) continue;
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (onEvent) {
+          onEvent(parsed);
+        }
+      }
+    }
+    return;
+  }
+
   const body = {
     model,
     input,
@@ -1227,6 +1431,41 @@ function findFirmwarePath(log, fallbackName = "") {
   const searchRoot = path.join(ROOT_DIR, ".esphome", "build");
   const found = findLatestFirmware(searchRoot, 3);
   return found || "";
+}
+
+function findFirmwareForYaml(yamlText, filename = "") {
+  // 尝试从YAML中提取设备名称
+  let deviceName = "";
+  try {
+    const doc = safeLoadYaml(yamlText);
+    if (doc && doc.esphome && doc.esphome.name) {
+      deviceName = doc.esphome.name;
+    }
+  } catch {
+    // 忽略解析错误
+  }
+  
+  // 如果没有从YAML中获取到名称，使用文件名
+  if (!deviceName && filename) {
+    deviceName = path.basename(filename, path.extname(filename));
+  }
+  
+  if (!deviceName) {
+    return "";
+  }
+  
+  // 尝试常见的固件路径
+  const candidates = [
+    path.join(ROOT_DIR, ".esphome", "build", deviceName, ".pioenvs", deviceName, "firmware.bin"),
+    path.join(ROOT_DIR, ".esphome", "build", deviceName, "firmware.bin"),
+    path.join(ROOT_DIR, ".pioenvs", deviceName, "firmware.bin"),
+  ];
+  
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  
+  return "";
 }
 
 function findLatestFirmware(root, depth) {
@@ -1603,8 +1842,8 @@ async function generateHaIntegration(payload = {}, onStatus, onDelta) {
     const agentKey = String(ha?.agent_key || process.env.HA_AGENT_KEY || "");
 
     const apiKey = String(config?.api_key || process.env.OPENAI_API_KEY || "");
-    const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
-    const model = String(config?.model || process.env.OPENAI_MODEL || "gpt-5.2-codex");
+    const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, "");
+    const model = String(config?.model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL);
     const reasoningEffort = process.env.OPENAI_REASONING_EFFORT || "";
     const disableStore = String(process.env.OPENAI_DISABLE_RESPONSE_STORAGE || "").toLowerCase() === "true";
 
@@ -1738,8 +1977,8 @@ function loadChatFileContext(context = {}) {
 
 async function handleChat(message, config = {}, history = [], context = {}) {
   const apiKey = String(config?.api_key || process.env.OPENAI_API_KEY || "");
-  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
-  const model = String(config?.model || process.env.OPENAI_MODEL || "gpt-5.2-codex");
+  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, "");
+  const model = String(config?.model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL);
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT || "";
   const disableStore = String(process.env.OPENAI_DISABLE_RESPONSE_STORAGE || "").toLowerCase() === "true";
 
@@ -1770,46 +2009,24 @@ async function handleChat(message, config = {}, history = [], context = {}) {
     systemParts.push(`文件内容:\n${fileContext.text}`);
   }
 
-  const body = {
-    model,
-    input: [
-      {
-        role: "system",
-        content: systemParts.join("\n\n"),
-      },
-      ...cleanedHistory,
-      { role: "user", content: message },
-    ],
-    instructions: "你是一个聊天助手，提供修改建议与排错思路；可说明系统会自动生成/编译，但不要声称你已直接改写用户文件。",
-    store: !disableStore,
-  };
-  if (reasoningEffort) {
-    body.reasoning = { effort: reasoningEffort };
-  }
-
-  const resp = await fetch(`${baseUrl}/v1/responses`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const input = [
+    {
+      role: "system",
+      content: systemParts.join("\n\n"),
     },
-    body: JSON.stringify(body),
-  });
+    ...cleanedHistory,
+    { role: "user", content: message },
+  ];
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`OpenAI 请求失败: ${resp.status} ${text}`);
-  }
-
-  const data = await resp.json();
+  const data = await callOpenAI(baseUrl, apiKey, model, input, reasoningEffort, disableStore);
   const reply = extractOutputText(data);
   return reply || "（空响应）";
 }
 
 async function handleChatExec(message, config = {}, history = [], context = {}, options = {}, build = {}) {
   const apiKey = String(config?.api_key || process.env.OPENAI_API_KEY || "");
-  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
-  const model = String(config?.model || process.env.OPENAI_MODEL || "gpt-5.2-codex");
+  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, "");
+  const model = String(config?.model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL);
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT || "";
   const disableStore = String(process.env.OPENAI_DISABLE_RESPONSE_STORAGE || "").toLowerCase() === "true";
 
@@ -1839,37 +2056,16 @@ async function handleChatExec(message, config = {}, history = [], context = {}, 
     "每处修改前加一行中文注释，说明改动原因。",
   ].join(" ");
 
-  const body = {
-    model,
-    input: [
-      { role: "system", content: system },
-      ...cleanedHistory,
-      {
-        role: "user",
-        content: `修改指令：${message}\n\n原始 YAML：\n${fileContext.text}\n\n请输出修改后的完整 YAML。`,
-      },
-    ],
-    store: !disableStore,
-  };
-  if (reasoningEffort) {
-    body.reasoning = { effort: reasoningEffort };
-  }
-
-  const resp = await fetch(`${baseUrl}/v1/responses`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+  const input = [
+    { role: "system", content: system },
+    ...cleanedHistory,
+    {
+      role: "user",
+      content: `修改指令：${message}\n\n原始 YAML：\n${fileContext.text}\n\n请输出修改后的完整 YAML。`,
     },
-    body: JSON.stringify(body),
-  });
+  ];
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`OpenAI 请求失败: ${resp.status} ${text}`);
-  }
-
-  const data = await resp.json();
+  const data = await callOpenAI(baseUrl, apiKey, model, input, reasoningEffort, disableStore);
   const reply = extractOutputText(data);
   const outputText = stripCodeFence(reply || "");
   if (!outputText.trim()) {
@@ -1935,8 +2131,8 @@ async function handleChatGenerate(message, config = {}, history = [], options = 
 
 async function generateYamlWithAI(message, config = {}, history = []) {
   const apiKey = String(config?.api_key || process.env.OPENAI_API_KEY || "");
-  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || "https://api.openai.com").replace(/\/+$/, "");
-  const model = String(config?.model || process.env.OPENAI_MODEL || "gpt-5.2-codex");
+  const baseUrl = String(config?.base_url || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL).replace(/\/+$/, "");
+  const model = String(config?.model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL);
   const reasoningEffort = process.env.OPENAI_REASONING_EFFORT || "";
   const disableStore = String(process.env.OPENAI_DISABLE_RESPONSE_STORAGE || "").toLowerCase() === "true";
 
@@ -2065,4 +2261,54 @@ function buildAiOutputName(filename) {
   const ext = path.extname(filename);
   const base = path.basename(filename, ext);
   return `${base}.ai${ext || ".yaml"}`;
+}
+
+function isGeneratedFileName(filename) {
+  const name = String(filename || "").toLowerCase();
+  return name.includes(".homekit.") || name.includes(".ai.");
+}
+
+function addHomekitResetButton(text, platform, homekitId) {
+  const hkId = homekitId || "my_hk";
+  let result = text;
+  
+  // 添加 button 重置部分（如果不存在）
+  if (!/(^|\n)\s*button\s*:/m.test(result)) {
+    result += `
+# HomeKit 重置按钮
+button:
+  - platform: template
+    name: "重置 HomeKit"
+    id: reset_homekit
+    on_press:
+      - homekit.reset_storage: ${hkId}`;
+  } else if (!/(^|\n)\s*-\s*platform:\s*template.*重置 HomeKit/m.test(result)) {
+    // 如果已有 button 部分但没有重置按钮，在适当位置添加
+    // 简化：在 button: 后添加
+    result = result.replace(/(^|\n\s*)button:\s*(?:\n\s*#.*)?/m, `$&
+  - platform: template
+    name: "重置 HomeKit"
+    id: reset_homekit
+    on_press:
+      - homekit.reset_storage: ${hkId}`);
+  }
+  
+  // 添加 text_sensor 显示配对码部分（如果不存在）
+  if (!/(^|\n)\s*text_sensor\s*:/m.test(result)) {
+    result += `
+# 显示 HomeKit 配对码
+text_sensor:
+  - platform: template
+    name: "HomeKit 配对码"
+    id: id_homekit_setup_code
+    update_interval: 1h
+    lambda: |-
+      std::string code = id(${hkId})->get_setup_code();
+      if (code.empty()) {
+        return {"等待生成"};
+      }
+      return {code};`;
+  }
+  
+  return result;
 }

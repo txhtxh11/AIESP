@@ -22,7 +22,7 @@ class HomekitComponent : public PollingComponent {
  public:
   HomekitComponent() : PollingComponent(2000) {}
 
-  void set_setup_code(const char* sc) {}
+  void set_setup_code(const char* sc);
   void set_name(const char* n) { this->name_ = n; }
   
   // 所有add方法都是累积式的，YAML中没有的类型不会调用，vector保持为空

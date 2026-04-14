@@ -5,7 +5,7 @@
 **主要功能**
 - 解析 ESPHome YAML，自动识别 `esp32` / `esp8266`
 - 提取实体并勾选生成 HomeKit 映射，缺失 `id` 自动补全
-- 自动插入 `external_components` 指向本地 `homekit-esp32` / `homekit-esp8226`
+- 自动插入 `external_components` 指向本地 `homekit-esp32` / `homekit-esp8266`
 - 可选自动插入 `web_server` + `www.js` 中文面板（v2）
 - AI 聊天：生成/修改 YAML、自动编译修复
 - 自动编译（`esphome compile/run`）与固件下载
@@ -15,7 +15,7 @@
 - `web-panel/` Web 面板与 API 服务（Node.js）
 - `ha-agent/` Home Assistant 写入代理（可选）
 - `homekit-esp32/` ESP32 HomeKit 组件（ESPHome external_components）
-- `homekit-esp8226/` ESP8266 HomeKit 组件（ESPHome external_components）
+- `homekit-esp8266/` ESP8266 HomeKit 组件（ESPHome external_components）
 - `www.js` ESPHome `web_server` v2 前端文件
 - `docker-compose.yml` 一键启动 Web 面板
 
@@ -76,5 +76,5 @@
 - 参考 `docker-compose.yml` 中的注释：`privileged: true` 与 `devices` 映射
 
 **备注**
-- 生成的 YAML 会自动插入 `external_components`，请保留 `homekit-esp32/` 与 `homekit-esp8226/` 目录
+- 生成的 YAML 会自动插入 `external_components`，请保留 `homekit-esp32/` 与 `homekit-esp8266/` 目录
 - `web_server` 将使用 `js_include: "v2/www.js"` 与 `version: 2`

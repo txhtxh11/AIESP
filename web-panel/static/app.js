@@ -54,7 +54,11 @@ const sensorTypes = ["temperature", "humidity", "illuminance"];
 const binaryTypes = ["contact", "motion", "smoke", "leak", "occupancy"];
 const MAX_CHAT_HISTORY = 30;
 
-init();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
 
 function init() {
   refreshFileList();
@@ -93,8 +97,20 @@ loadBtn.addEventListener("click", () => {
       renderEntities();
       const platformLabel = currentPlatform ? currentPlatform.toUpperCase() : "未知";
       platformChip.textContent = platformLabel;
-      setupCodeField.classList.toggle("hidden", currentPlatform !== "esp8266");
+      // 配对码输入框对所有平台显示
+      setupCodeField.classList.toggle("hidden", !currentPlatform);
       fileSummary.textContent = `已读取 ${filename}，请勾选需要的实体。`;
+      
+      // 检查是否有可用的固件文件
+      if (data.firmwarePath) {
+        firmwareDownloadBtn.disabled = false;
+        firmwareDownloadBtn.dataset.path = data.firmwarePath;
+        fileSummary.textContent += ` 检测到已有固件文件。`;
+      } else {
+        firmwareDownloadBtn.disabled = true;
+        firmwareDownloadBtn.dataset.path = "";
+      }
+      
       setStatus("实体读取完成");
     })
     .catch((err) => {
@@ -169,6 +185,8 @@ generateBtn.addEventListener("click", () => {
       console.error(err);
     });
 });
+
+
 
 downloadBtn.addEventListener("click", () => {
   const name = downloadBtn.dataset.filename;
@@ -280,65 +298,23 @@ if (logFloatHeader) {
   });
 }
 
-aiBuildBtn.addEventListener("click", () => {
+aiBuildBtn.addEventListener("click", async () => {
   if (!currentFile) {
     setStatus("请先选择 YAML 文件");
     return;
   }
   persistChatConfig();
-  const attempts = Math.max(1, Math.min(10, Number(aiBuildAttempts?.value || 3)));
+  const message = "自动编译修复";
+  const attempt = Math.max(1, Math.min(10, Number(aiBuildAttempts?.value || 3)));
   const mode = aiBuildMode?.value || "compile";
   aiBuildSummary.textContent = "自动编译修复中...";
   aiBuildBtn.disabled = true;
   aiBuildBtn.textContent = "运行中...";
 
-  fetch("/api/auto-build", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filename: currentFile,
-      mode,
-      attempts,
-      device: aiBuildDevice?.value.trim() || undefined,
-      config: {
-        base_url: apiBaseUrlInput.value.trim(),
-        api_key: apiKeyInput.value.trim(),
-        model: apiModelInput.value.trim(),
-      },
-      options: {
-        output_name: aiOutputNameInput?.value.trim() || undefined,
-      },
-    }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      if (data.error) {
-        aiBuildSummary.textContent = data.error;
-        setStatus(data.error);
-        return;
-      }
-      if (data.outputText) {
-        outputPreview.value = data.outputText;
-      }
-      if (data.outputName) {
-        downloadBtn.disabled = false;
-        downloadBtn.dataset.filename = data.outputName;
-        resultSummary.textContent = `AI 已生成：${data.outputName}`;
-      }
-      if (data.reply) {
-        appendChat("ai", data.reply);
-      }
-      aiBuildSummary.textContent = data.status || "完成";
-      setStatus("自动编译完成");
-    })
-    .catch(() => {
-      aiBuildSummary.textContent = "自动编译失败";
-      setStatus("自动编译失败");
-    })
-    .finally(() => {
-      aiBuildBtn.disabled = false;
-      aiBuildBtn.textContent = "自动编译修复";
-    });
+  await startStreamBuild(message);
+
+  aiBuildBtn.disabled = false;
+  aiBuildBtn.textContent = "自动编译修复";
 });
 
 
@@ -460,14 +436,17 @@ function collectSelections() {
     selections.fan = collectChecked("fan");
     selections.climate = collectChecked("climate");
     selections.lock = collectChecked("lock");
-    return selections;
+  } else {
+    selections.switches = collectChecked("switches");
+    selections.lights = collectChecked("lights");
+    selections.fans = collectChecked("fans");
+    selections.sensors = collectTyped("sensors");
+    selections.binary_sensors = collectTyped("binary_sensors");
   }
 
-  selections.switches = collectChecked("switches");
-  selections.lights = collectChecked("lights");
-  selections.fans = collectChecked("fans");
-  selections.sensors = collectTyped("sensors");
-  selections.binary_sensors = collectTyped("binary_sensors");
+  // 使用固定配对码
+  selections.setup_code = "111-11-111";
+
   return selections;
 }
 

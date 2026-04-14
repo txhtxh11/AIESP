@@ -15,14 +15,16 @@ void HomekitComponent::setup() {
   this->setup_id_ = mac_str.length() >= 4 ? mac_str.substr(mac_str.length() - 4) : "ESPH";
   for (auto &c : this->setup_id_) c = toupper(c);
 
-  uint8_t mac[6];
-  esphome::get_mac_address_raw(mac);
-  uint32_t seed = (mac[3] << 16) | (mac[4] << 8) | mac[5];
-  srand(seed);
-  
-  char code_buf[12];
-  sprintf(code_buf, "%03d-%02d-%03d", rand()%900+100, rand()%90+10, rand()%900+100);
-  this->generated_code_ = std::string(code_buf);
+  if (this->generated_code_.empty()) {
+    uint8_t mac[6];
+    esphome::get_mac_address_raw(mac);
+    uint32_t seed = (mac[3] << 16) | (mac[4] << 8) | mac[5];
+    srand(seed);
+    
+    char code_buf[12];
+    sprintf(code_buf, "%03d-%02d-%03d", rand()%900+100, rand()%90+10, rand()%900+100);
+    this->generated_code_ = std::string(code_buf);
+  }
 
   this->started_ = false;
 }
@@ -118,6 +120,12 @@ void HomekitComponent::loop() {
     for (auto* bin_sensor : this->homekit_bin_sensors_) {
       bin_sensor->tick();
     }
+  }
+}
+
+void HomekitComponent::set_setup_code(const char* sc) {
+  if (sc && strlen(sc) > 0) {
+    this->generated_code_ = std::string(sc);
   }
 }
 
